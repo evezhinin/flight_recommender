@@ -1,0 +1,4 @@
+kaggle==2.0.0
+kagglesdk==0.1.16
+mrjob==0.7.4
+pandas==3.0.2
