@@ -72,21 +72,34 @@ def health():
     return {"status": "ok", "records": result.count}
 
 
+def fetch_all(table, column, filters=None):
+    """Paginate through all rows to collect unique values of one column."""
+    values = set()
+    page_size = 1000
+    page = 0
+    while True:
+        query = supabase.table(table).select(column).range(page * page_size, (page + 1) * page_size - 1)
+        if filters:
+            for col, val in filters.items():
+                query = query.eq(col, val)
+        result = query.execute()
+        for r in result.data:
+            values.add(r[column])
+        if len(result.data) < page_size:
+            break
+        page += 1
+    return sorted(values)
+
+
 @app.get("/api/origins")
 def get_origins():
-    result = supabase.table("recommendations").select("origin").limit(20000).execute()
-    origins = sorted(set(r["origin"] for r in result.data))
-    return origins
+    return fetch_all("recommendations", "origin")
 
 
 @app.get("/api/destinations")
 def get_destinations(origin: str = Query(default="")):
-    query = supabase.table("recommendations").select("destination").limit(20000)
-    if origin:
-        query = query.eq("origin", origin.upper().strip())
-    result = query.execute()
-    destinations = sorted(set(r["destination"] for r in result.data))
-    return destinations
+    filters = {"origin": origin.upper().strip()} if origin else None
+    return fetch_all("recommendations", "destination", filters)
 
 
 @app.get("/api/airlines")
