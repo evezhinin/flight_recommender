@@ -1,0 +1,7 @@
+mport "tailwindcss";
+
+body {
+  margin: 0;
+  background-color: #F8F9FE;
+  -webkit-font-smoothing: antialiased;
+}
