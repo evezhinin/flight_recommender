@@ -15,6 +15,17 @@ const AIRPORT_CITIES = {
   SRQ: 'Sarasota',
 };
 
+const AIRLINE_COLORS = {
+  AA: 'bg-blue-600 text-white',
+  AS: 'bg-teal-600 text-white',
+  B6: 'bg-indigo-500 text-white',
+  DL: 'bg-red-600 text-white',
+  G4: 'bg-amber-500 text-white',
+  NK: 'bg-yellow-400 text-yellow-900',
+  UA: 'bg-blue-900 text-white',
+  WN: 'bg-orange-500 text-white',
+};
+
 const airportLabel = (code) =>
   AIRPORT_CITIES[code] ? `${code} — ${AIRPORT_CITIES[code]}` : code;
 
@@ -32,12 +43,12 @@ const Header = () => (
 );
 
 const SearchControls = ({
-  origin, setOrigin,
+  origin, onOriginChange,
   dest, setDest,
   passengers, setPassengers,
   travelClass, setTravelClass,
   onSearch, onOpenFilters,
-  isProcessing, origins, destinations,
+  isProcessing, origins, originsLoading, destinations,
 }) => (
   <div className="bg-white p-3 rounded-[32px] shadow-2xl flex flex-col lg:flex-row items-stretch lg:items-center gap-2 border border-white">
     <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-y md:divide-y-0 lg:divide-x divide-slate-100">
@@ -49,10 +60,10 @@ const SearchControls = ({
           <MapPin size={16} className="text-slate-300 shrink-0" />
           <select
             value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
+            onChange={(e) => onOriginChange(e.target.value)}
             className="w-full bg-transparent border-none p-0 font-bold text-base outline-none appearance-none cursor-pointer"
           >
-            <option value="">Where from?</option>
+            <option value="">{originsLoading ? 'Loading airports…' : 'Where from?'}</option>
             {origins.map(a => <option key={a} value={a}>{airportLabel(a)}</option>)}
           </select>
         </div>
@@ -155,9 +166,10 @@ const FlightCard = ({ flight, passengers }) => {
   const scorePercent = (flight.score * 100).toFixed(1);
   const rankColor = rank != null && rank <= 3 ? RANK_COLORS[rank - 1] : 'bg-slate-100 text-slate-500';
   const delayPct = ((flight.delay_prob ?? 0) * 100).toFixed(0);
-
   const perPersonPrice = flight.price ?? 0;
   const totalPrice = (perPersonPrice * passengers).toFixed(2);
+  const airlineCode = flight.airline ?? '';
+  const avatarColor = AIRLINE_COLORS[airlineCode] ?? 'bg-slate-100 text-slate-400';
 
   return (
     <div className="bg-white rounded-[40px] shadow-xl shadow-slate-200/50 border border-white p-8 relative overflow-hidden group hover:-translate-y-1 transition-all">
@@ -173,8 +185,8 @@ const FlightCard = ({ flight, passengers }) => {
       <div className="flex flex-col md:flex-row items-center justify-between gap-8">
         {/* Left: airline + tags */}
         <div className="flex items-center gap-6 w-full md:w-auto">
-          <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center font-black text-slate-300 text-2xl border border-slate-100 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors shrink-0">
-            {(flight.airline_name || flight.airline || 'F')[0]}
+          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shrink-0 transition-opacity group-hover:opacity-90 ${avatarColor}`}>
+            {airlineCode || (flight.airline_name ?? 'F')[0]}
           </div>
           <div>
             <h4 className="font-bold text-xl text-slate-800">{flight.airline_name || flight.airline}</h4>
@@ -256,7 +268,6 @@ const WeightsModal = ({ show, onClose, weights, setWeights }) => {
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{w.label}</span>
                   <span className="text-sm font-mono text-indigo-600 font-black">{pct}%</span>
                 </div>
-                {/* bar tracks effective %; slider handle tracks raw value — both update together */}
                 <div className="relative h-2 bg-slate-100 rounded-full">
                   <div className="absolute h-full bg-indigo-600 rounded-full transition-all" style={{ width: `${pct}%` }} />
                   <input
@@ -270,12 +281,11 @@ const WeightsModal = ({ show, onClose, weights, setWeights }) => {
           })}
         </div>
 
-        {/* Travel class note */}
         <div className="mt-8 p-4 bg-slate-50 rounded-2xl">
           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Travel Class Bonus</p>
           <p className="text-xs text-slate-500 leading-relaxed">
-            Business class adds a fixed scoring boost · Eco Plus adds a small boost · Economy has no bonus.
-            This is separate from the weights above.
+            Business adds a fixed scoring boost · Eco Plus adds a small boost · Economy has no bonus.
+            This is applied on top of the weights above.
           </p>
         </div>
 
@@ -287,51 +297,64 @@ const WeightsModal = ({ show, onClose, weights, setWeights }) => {
   );
 };
 
+const STOPS_FILTERS = [
+  { id: 'any',    label: 'Any' },
+  { id: 'direct', label: 'Direct' },
+  { id: '1',      label: '1 Stop' },
+  { id: '2+',     label: '2+ Stops' },
+];
+
 // --- MAIN APP COMPONENT ---
 
 export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
-  const [slowLoad, setSlowLoad] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
-  const [results, setResults] = useState(null);
-  const [searchMeta, setSearchMeta] = useState(null);
-  const [error, setError] = useState(null);
-  const [directOnly, setDirectOnly] = useState(false);
+  const [slowLoad, setSlowLoad]         = useState(false);
+  const [showFilters, setShowFilters]   = useState(false);
+  const [results, setResults]           = useState(null);
+  const [searchMeta, setSearchMeta]     = useState(null);
+  const [error, setError]               = useState(null);
+  const [stopsFilter, setStopsFilter]   = useState('any');
 
-  const [origin, setOrigin] = useState('');
-  const [dest, setDest] = useState('');
+  const [origin, setOrigin]         = useState('');
+  const [dest, setDest]             = useState('');
   const [passengers, setPassengers] = useState(1);
   const [travelClass, setTravelClass] = useState('Economy');
 
-  const [origins, setOrigins] = useState([]);
+  const [origins, setOrigins]           = useState([]);
+  const [originsLoading, setOriginsLoading] = useState(true);
   const [destinations, setDestinations] = useState([]);
 
   const [weights, setWeights] = useState({
     w1: 0.35, w2: 0.20, w3: 0.15, w4: 0.20, w5: 0.10,
   });
 
-  // Show cold-start warning after 8 s of loading
+  // Cold-start warning after 8 s — all setState calls wrapped in setTimeout to satisfy lint rule
   useEffect(() => {
-    if (!isProcessing) { setSlowLoad(false); return; }
-    const t = setTimeout(() => setSlowLoad(true), 8000);
+    const t = setTimeout(() => setSlowLoad(isProcessing), isProcessing ? 8000 : 0);
     return () => clearTimeout(t);
   }, [isProcessing]);
 
   useEffect(() => {
     fetch(`${API}/api/origins`)
       .then(r => r.json())
-      .then(setOrigins)
-      .catch(() => {});
+      .then(data => { setOrigins(data); setOriginsLoading(false); })
+      .catch(() => setOriginsLoading(false));
   }, []);
 
+  // Clearing dest/destinations happens in the event handler, not here — avoids synchronous setState in effect
   useEffect(() => {
-    if (!origin) { setDestinations([]); setDest(''); return; }
-    setDest('');
+    if (!origin) return;
     fetch(`${API}/api/destinations?origin=${origin}`)
       .then(r => r.json())
       .then(setDestinations)
       .catch(() => {});
   }, [origin]);
+
+  const handleOriginChange = (value) => {
+    setOrigin(value);
+    setDest('');
+    setDestinations([]);
+  };
 
   const handleSearch = async () => {
     if (!origin || !dest) return;
@@ -341,7 +364,7 @@ export default function App() {
     setSearchMeta(null);
     setError(null);
     setShowFilters(false);
-    setDirectOnly(false);
+    setStopsFilter('any');
 
     try {
       const queryParams = new URLSearchParams({
@@ -365,7 +388,12 @@ export default function App() {
     }
   };
 
-  const visibleResults = directOnly ? (results ?? []).filter(f => f.stops === 0) : (results ?? []);
+  const visibleResults = (results ?? []).filter(f => {
+    if (stopsFilter === 'direct') return f.stops === 0;
+    if (stopsFilter === '1')      return f.stops === 1;
+    if (stopsFilter === '2+')     return f.stops >= 2;
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-[#F8F9FE] text-slate-900 font-sans pb-24 selection:bg-indigo-100">
@@ -382,14 +410,14 @@ export default function App() {
           </h1>
 
           <SearchControls
-            origin={origin} setOrigin={setOrigin}
+            origin={origin} onOriginChange={handleOriginChange}
             dest={dest} setDest={setDest}
             passengers={passengers} setPassengers={setPassengers}
             travelClass={travelClass} setTravelClass={setTravelClass}
             onSearch={handleSearch}
             onOpenFilters={() => setShowFilters(true)}
             isProcessing={isProcessing}
-            origins={origins}
+            origins={origins} originsLoading={originsLoading}
             destinations={destinations}
           />
 
@@ -412,9 +440,7 @@ export default function App() {
           <div className="bg-white/90 backdrop-blur-md rounded-[40px] p-12 shadow-2xl border border-white mb-8 flex flex-col items-center justify-center text-center">
             <Activity size={40} className="text-indigo-600 animate-pulse mb-6" />
             <h3 className="text-2xl font-bold text-slate-800 tracking-tight">Searching for Flights</h3>
-            <p className="text-slate-400 text-sm mt-2 max-w-xs font-medium">
-              Scoring routes with your preferences…
-            </p>
+            <p className="text-slate-400 text-sm mt-2 max-w-xs font-medium">Scoring routes with your preferences…</p>
             {slowLoad && (
               <p className="text-amber-500 text-xs font-bold mt-4 max-w-xs">
                 The server may be waking up from sleep — this can take up to 30 s on the first request.
@@ -423,10 +449,10 @@ export default function App() {
           </div>
         )}
 
-        {/* Results header + direct-only toggle */}
+        {/* Results header + stops filter chips */}
         {results && searchMeta && !isProcessing && (
-          <div className="flex items-center justify-between mb-4 px-2">
-            <div className="flex items-center gap-2 text-slate-500 text-sm font-bold">
+          <div className="mb-4 px-2 space-y-3">
+            <div className="flex items-center gap-2 text-slate-500 text-white quickytext-sm font-bold">
               <span>{searchMeta.origin}</span>
               <ArrowRight size={14} />
               <span>{searchMeta.dest}</span>
@@ -435,12 +461,17 @@ export default function App() {
               <span className="text-slate-300 font-normal">·</span>
               <span>{searchMeta.count} result{searchMeta.count !== 1 ? 's' : ''}</span>
             </div>
-            <button
-              onClick={() => setDirectOnly(v => !v)}
-              className={`text-xs font-black uppercase tracking-widest px-3 py-1.5 rounded-full transition-all ${directOnly ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-            >
-              Direct only
-            </button>
+            <div className="flex items-center gap-2">
+              {STOPS_FILTERS.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setStopsFilter(f.id)}
+                  className={`text-xs font-black uppercase tracking-widest px-3 py-1.5 rounded-full transition-all ${stopsFilter === f.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -452,8 +483,8 @@ export default function App() {
               ))
             ) : (
               <div className="py-16 text-center">
-                <p className="text-slate-400 text-sm font-medium">No direct flights found for this route.</p>
-                <button onClick={() => setDirectOnly(false)} className="mt-3 text-indigo-500 text-xs font-bold underline">
+                <p className="text-slate-400 text-sm font-medium">No flights match this filter.</p>
+                <button onClick={() => setStopsFilter('any')} className="mt-3 text-indigo-500 text-xs font-bold underline">
                   Show all flights
                 </button>
               </div>
