@@ -74,14 +74,14 @@ def health():
 
 @app.get("/api/origins")
 def get_origins():
-    result = supabase.table("recommendations").select("origin").execute()
+    result = supabase.table("recommendations").select("origin").limit(20000).execute()
     origins = sorted(set(r["origin"] for r in result.data))
     return origins
 
 
 @app.get("/api/destinations")
 def get_destinations(origin: str = Query(default="")):
-    query = supabase.table("recommendations").select("destination")
+    query = supabase.table("recommendations").select("destination").limit(20000)
     if origin:
         query = query.eq("origin", origin.upper().strip())
     result = query.execute()
